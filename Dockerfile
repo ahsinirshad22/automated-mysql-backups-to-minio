@@ -1,15 +1,15 @@
-FROM debian:bookworm-slim
+FROM alpine:latest
 
 # Install required packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     mysql-client \
     curl \
-    cron \
+    dcron \
     gzip \
     openssl \
     coreutils \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    bash
 
 # Create necessary directories
 RUN mkdir -p /var/log /etc/cron.d
@@ -25,9 +25,9 @@ RUN chmod +x /backup.sh /entrypoint.sh /s3.sh
 # Set working directory
 WORKDIR /
 
-# Health check (optional - just verifies cron is running)
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD pgrep cron > /dev/null || exit 1
+    CMD pgrep crond > /dev/null || exit 1
 
 # Start the entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

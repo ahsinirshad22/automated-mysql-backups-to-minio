@@ -110,5 +110,5 @@ echo -e "${GREEN}Starting cron daemon in foreground${NC}"
 echo "Logs available at: /var/log/backup.log"
 echo ""
 
-# Start cron daemon in foreground
-cron -f
+# Start cron daemon in foreground (Alpine uses crond)
+exec crond -f -l 2
