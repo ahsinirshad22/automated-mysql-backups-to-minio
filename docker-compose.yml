@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  db-backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: db-backup:1.0.0
+    container_name: db-backup
+    restart: unless-stopped
+    environment:
+      # Database Configuration
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAMES: ${DB_NAMES}
+      
+      # S3 Configuration
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PATH_PREFIX: ${S3_PATH_PREFIX:-backups}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      
+      # Cron & Retention
+      CRON_SCHEDULE: ${CRON_SCHEDULE:-0 2 * * *}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-3600}
+    
+    # Optional: Mount a volume to access logs
+    volumes:
+      - ./logs:/var/log:rw
+    
+    # Optional: Network configuration for Coolify
+    # networks:
+    #   - coolify
+    
+    healthcheck:
+      test: ["CMD", "pgrep", "cron"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# Optional: Uncomment if using Coolify network
+# networks:
+#   coolify:
+#     external: true
