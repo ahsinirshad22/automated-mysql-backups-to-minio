@@ -28,6 +28,9 @@ services:
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 2 * * *}
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
       BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-3600}
+      
+      # Health Checks (set to 'true' to skip startup validation)
+      SKIP_HEALTH_CHECK: ${SKIP_HEALTH_CHECK:-false}
     
     # Optional: Mount a volume to access logs
     volumes:

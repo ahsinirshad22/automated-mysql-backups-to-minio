@@ -34,38 +34,82 @@ validate_env() {
 test_db_connection() {
     echo "Testing database connectivity..."
     local db_port=${DB_PORT:-3306}
+    local max_attempts=10
+    local attempt=1
     
-    if ! mysql -h "$DB_HOST" -P "$db_port" -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" &>/dev/null; then
-        echo -e "${RED}ERROR: Cannot connect to database at ${DB_HOST}:${db_port}${NC}"
-        echo -e "${RED}Please verify:${NC}"
-        echo -e "  - Database host is correct: ${DB_HOST}"
-        echo -e "  - Database port is correct: ${db_port}"
-        echo -e "  - Database user/password are correct"
-        echo -e "  - Database is running and accessible"
-        return 1
-    fi
+    while [[ $attempt -le $max_attempts ]]; do
+        echo "  Attempt $attempt/$max_attempts: Connecting to ${DB_HOST}:${db_port}..."
+        
+        if mysql -h "$DB_HOST" -P "$db_port" -u "$DB_USER" -p"$DB_PASSWORD" --connect-timeout=5 -e "SELECT 1" &>/dev/null; then
+            echo -e "${GREEN}✓ Database connection successful${NC}"
+            return 0
+        fi
+        
+        if [[ $attempt -lt $max_attempts ]]; then
+            sleep 2
+        fi
+        
+        ((attempt++))
+    done
     
-    echo -e "${GREEN}✓ Database connection successful${NC}"
-    return 0
+    echo -e "${RED}ERROR: Cannot connect to database after ${max_attempts} attempts${NC}"
+    echo -e "${RED}Please verify:${NC}"
+    echo -e "  - Database host is correct: ${DB_HOST}"
+    echo -e "  - Database port is correct: ${db_port}"
+    echo -e "  - Database user/password are correct"
+    echo -e "  - Database is running and accessible"
+    echo -e "  - Network connectivity exists between containers (Coolify network)"
+    echo ""
+    echo "Debug info:"
+    echo "  DB_HOST=${DB_HOST}"
+    echo "  DB_PORT=${db_port}"
+    echo "  DB_USER=${DB_USER}"
+    echo ""
+    echo "To skip this check, set: SKIP_HEALTH_CHECK=true"
+    echo ""
+    
+    return 1
 }
 
 # Test MinIO connectivity
 test_minio_connection() {
     echo "Testing MinIO connectivity..."
+    local max_attempts=3
+    local attempt=1
     
-    local http_code=$(curl -s -w "%{http_code}" -o /dev/null -I "${S3_ENDPOINT}" 2>/dev/null || echo "000")
+    while [[ $attempt -le $max_attempts ]]; do
+        echo "  Attempt $attempt/$max_attempts: Connecting to ${S3_ENDPOINT}..."
+        
+        local http_code=$(curl -s -w "%{http_code}" -o /tmp/minio_test.txt -I --connect-timeout=5 "${S3_ENDPOINT}" 2>/dev/null || echo "000")
+        local curl_exit=$?
+        
+        if [[ "$http_code" != "000" ]] && [[ $curl_exit -eq 0 ]]; then
+            echo -e "${GREEN}✓ MinIO connectivity successful (HTTP ${http_code})${NC}"
+            rm -f /tmp/minio_test.txt
+            return 0
+        fi
+        
+        if [[ $attempt -lt $max_attempts ]]; then
+            echo "  Connection failed (HTTP $http_code, curl exit: $curl_exit), waiting 3 seconds before retry..."
+            sleep 3
+        fi
+        
+        ((attempt++))
+    done
     
-    if [[ "$http_code" == "000" ]]; then
-        echo -e "${RED}ERROR: Cannot reach MinIO at ${S3_ENDPOINT}${NC}"
-        echo -e "${RED}Please verify:${NC}"
-        echo -e "  - MinIO endpoint is correct: ${S3_ENDPOINT}"
-        echo -e "  - MinIO service is running and accessible"
-        echo -e "  - Network connectivity is available"
-        return 1
-    fi
+    echo -e "${RED}ERROR: Cannot reach MinIO after ${max_attempts} attempts${NC}"
+    echo -e "${RED}Please verify:${NC}"
+    echo -e "  - MinIO endpoint is correct: ${S3_ENDPOINT}"
+    echo -e "  - MinIO service is running and accessible"
+    echo -e "  - Network connectivity is available"
+    echo -e "  - S3_ACCESS_KEY and S3_SECRET_KEY are configured"
+    echo ""
+    echo "Debug info:"
+    echo "  S3_ENDPOINT=${S3_ENDPOINT}"
+    echo "  S3_BUCKET=${S3_BUCKET}"
     
-    echo -e "${GREEN}✓ MinIO connectivity successful (HTTP ${http_code})${NC}"
-    return 0
+    rm -f /tmp/minio_test.txt
+    return 1
 }
 
 # Setup function
@@ -92,14 +136,21 @@ setup() {
     touch /var/log/backup.log
     chmod 666 /var/log/backup.log
     
-    # Test database connectivity
-    if ! test_db_connection; then
-        exit 1
-    fi
+    # Check if health checks should be skipped
+    SKIP_HEALTH_CHECK=${SKIP_HEALTH_CHECK:-false}
     
-    # Test MinIO connectivity
-    if ! test_minio_connection; then
-        exit 1
+    if [[ "$SKIP_HEALTH_CHECK" != "true" ]]; then
+        # Test database connectivity
+        if ! test_db_connection; then
+            exit 1
+        fi
+        
+        # Test MinIO connectivity
+        if ! test_minio_connection; then
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}⚠ Health checks SKIPPED (SKIP_HEALTH_CHECK=true)${NC}"
     fi
     
     # Export all env vars to /etc/environment so cron can access them
