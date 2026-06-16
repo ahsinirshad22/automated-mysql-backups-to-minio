@@ -30,6 +30,44 @@ validate_env() {
     return 0
 }
 
+# Test database connectivity
+test_db_connection() {
+    echo "Testing database connectivity..."
+    local db_port=${DB_PORT:-3306}
+    
+    if ! mysql -h "$DB_HOST" -P "$db_port" -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" &>/dev/null; then
+        echo -e "${RED}ERROR: Cannot connect to database at ${DB_HOST}:${db_port}${NC}"
+        echo -e "${RED}Please verify:${NC}"
+        echo -e "  - Database host is correct: ${DB_HOST}"
+        echo -e "  - Database port is correct: ${db_port}"
+        echo -e "  - Database user/password are correct"
+        echo -e "  - Database is running and accessible"
+        return 1
+    fi
+    
+    echo -e "${GREEN}✓ Database connection successful${NC}"
+    return 0
+}
+
+# Test MinIO connectivity
+test_minio_connection() {
+    echo "Testing MinIO connectivity..."
+    
+    local http_code=$(curl -s -w "%{http_code}" -o /dev/null -I "${S3_ENDPOINT}" 2>/dev/null || echo "000")
+    
+    if [[ "$http_code" == "000" ]]; then
+        echo -e "${RED}ERROR: Cannot reach MinIO at ${S3_ENDPOINT}${NC}"
+        echo -e "${RED}Please verify:${NC}"
+        echo -e "  - MinIO endpoint is correct: ${S3_ENDPOINT}"
+        echo -e "  - MinIO service is running and accessible"
+        echo -e "  - Network connectivity is available"
+        return 1
+    fi
+    
+    echo -e "${GREEN}✓ MinIO connectivity successful (HTTP ${http_code})${NC}"
+    return 0
+}
+
 # Setup function
 setup() {
     echo -e "${GREEN}Setting up DB Backup Service...${NC}"
@@ -53,6 +91,16 @@ setup() {
     mkdir -p /var/log
     touch /var/log/backup.log
     chmod 666 /var/log/backup.log
+    
+    # Test database connectivity
+    if ! test_db_connection; then
+        exit 1
+    fi
+    
+    # Test MinIO connectivity
+    if ! test_minio_connection; then
+        exit 1
+    fi
     
     # Export all env vars to /etc/environment so cron can access them
     echo "Exporting environment variables to /etc/environment..."
