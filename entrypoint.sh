@@ -30,6 +30,61 @@ validate_env() {
     return 0
 }
 
+shell_quote() {
+    local value="$1"
+    printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+write_env_file() {
+    local env_file="/etc/backup-env.sh"
+    local vars=(
+        DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAMES
+        DB_SSL_MODE DB_SSL_CA DB_SSL_CERT DB_SSL_KEY
+        S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_PATH_PREFIX S3_REGION
+        CRON_SCHEDULE RETENTION_DAYS BACKUP_TIMEOUT
+    )
+    local var
+
+    : > "$env_file"
+    for var in "${vars[@]}"; do
+        printf 'export %s=%s\n' "$var" "$(shell_quote "${!var}")" >> "$env_file"
+    done
+    printf 'export PATH=%s\n' "'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'" >> "$env_file"
+    chmod 0600 "$env_file"
+}
+
+build_db_ssl_args() {
+    local mode="${DB_SSL_MODE:-DISABLED}"
+    mode="${mode^^}"
+
+    DB_SSL_ARGS=()
+    case "$mode" in
+        DISABLED|FALSE|0|NO)
+            DB_SSL_ARGS+=(--skip-ssl)
+            ;;
+        VERIFY_DISABLED|REQUIRED|TRUE|1|YES)
+            DB_SSL_ARGS+=(--ssl --skip-ssl-verify-server-cert)
+            ;;
+        VERIFY_CA)
+            if [[ -z "${DB_SSL_CA:-}" ]]; then
+                echo -e "${RED}ERROR: DB_SSL_CA is required when DB_SSL_MODE=VERIFY_CA${NC}"
+                exit 1
+            fi
+            DB_SSL_ARGS+=(--ssl --ssl-verify-server-cert --ssl-ca="$DB_SSL_CA")
+            ;;
+        PREFERRED|"")
+            ;;
+        *)
+            echo -e "${RED}ERROR: Invalid DB_SSL_MODE: ${DB_SSL_MODE}${NC}"
+            echo "Allowed values: DISABLED, PREFERRED, VERIFY_DISABLED, VERIFY_CA"
+            exit 1
+            ;;
+    esac
+
+    [[ -n "${DB_SSL_CERT:-}" ]] && DB_SSL_ARGS+=(--ssl-cert="$DB_SSL_CERT")
+    [[ -n "${DB_SSL_KEY:-}" ]] && DB_SSL_ARGS+=(--ssl-key="$DB_SSL_KEY")
+}
+
 # Test database connectivity
 test_db_connection() {
     echo "Testing database connectivity..."
@@ -40,13 +95,13 @@ test_db_connection() {
     while [[ $attempt -le $max_attempts ]]; do
         echo "  Attempt $attempt/$max_attempts: Connecting to ${DB_HOST}:${db_port}..."
         
-        if mysql -h "$DB_HOST" -P "$db_port" -u "$DB_USER" -p"$DB_PASSWORD" --connect-timeout=5 -e "SELECT 1" &>/dev/null; then
+        if mysql -h "$DB_HOST" -P "$db_port" -u "$DB_USER" -p"$DB_PASSWORD" "${DB_SSL_ARGS[@]}" --connect-timeout=5 -e "SELECT 1" &>/dev/null; then
             echo -e "${GREEN}✓ Database connection successful${NC}"
             return 0
         fi
         
         if [[ $attempt -lt $max_attempts ]]; then
-            sleep 2
+            sleep 10
         fi
         
         ((attempt++))
@@ -80,17 +135,17 @@ test_minio_connection() {
     while [[ $attempt -le $max_attempts ]]; do
         echo "  Attempt $attempt/$max_attempts: Connecting to ${S3_ENDPOINT}..."
         
-        local http_code=$(curl -s -w "%{http_code}" -o /tmp/minio_test.txt -I --connect-timeout=5 "${S3_ENDPOINT}" 2>/dev/null || echo "000")
-        local curl_exit=$?
+        local http_code
+        http_code=$(curl -s -w "%{http_code}" -o /tmp/minio_test.txt -I --connect-timeout=5 "${S3_ENDPOINT%/}" 2>/dev/null) || http_code="000"
         
-        if [[ "$http_code" != "000" ]] && [[ $curl_exit -eq 0 ]]; then
+        if [[ "$http_code" != "000" ]]; then
             echo -e "${GREEN}✓ MinIO connectivity successful (HTTP ${http_code})${NC}"
             rm -f /tmp/minio_test.txt
             return 0
         fi
         
         if [[ $attempt -lt $max_attempts ]]; then
-            echo "  Connection failed (HTTP $http_code, curl exit: $curl_exit), waiting 3 seconds before retry..."
+            echo "  Connection failed (HTTP $http_code), waiting 3 seconds before retry..."
             sleep 3
         fi
         
@@ -124,10 +179,12 @@ setup() {
     
     # Set defaults
     DB_PORT=${DB_PORT:-3306}
+    DB_SSL_MODE=${DB_SSL_MODE:-DISABLED}
     S3_REGION=${S3_REGION:-us-east-1}
     S3_PATH_PREFIX=${S3_PATH_PREFIX:-backups}
     RETENTION_DAYS=${RETENTION_DAYS:-30}
     BACKUP_TIMEOUT=${BACKUP_TIMEOUT:-3600}
+    build_db_ssl_args
     
     echo -e "${GREEN}✓ Environment validated${NC}"
     
@@ -153,34 +210,16 @@ setup() {
         echo -e "${YELLOW}⚠ Health checks SKIPPED (SKIP_HEALTH_CHECK=true)${NC}"
     fi
     
-    # Export all env vars to /etc/environment so cron can access them
-    echo "Exporting environment variables to /etc/environment..."
-    cat > /etc/environment << EOF
-DB_HOST="$DB_HOST"
-DB_PORT="$DB_PORT"
-DB_USER="$DB_USER"
-DB_PASSWORD="$DB_PASSWORD"
-DB_NAMES="$DB_NAMES"
-S3_ENDPOINT="$S3_ENDPOINT"
-S3_ACCESS_KEY="$S3_ACCESS_KEY"
-S3_SECRET_KEY="$S3_SECRET_KEY"
-S3_BUCKET="$S3_BUCKET"
-S3_PATH_PREFIX="$S3_PATH_PREFIX"
-S3_REGION="$S3_REGION"
-CRON_SCHEDULE="$CRON_SCHEDULE"
-RETENTION_DAYS="$RETENTION_DAYS"
-BACKUP_TIMEOUT="$BACKUP_TIMEOUT"
-PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EOF
+    # Export all env vars to a shell file so cron can access them
+    echo "Exporting environment variables for cron..."
+    write_env_file
     
     # Setup cron job
     echo "Setting up cron schedule: $CRON_SCHEDULE"
-    cat > /etc/cron.d/backup-cron << EOF
-# Backup cron job
-$CRON_SCHEDULE root /backup.sh >> /var/log/backup.log 2>&1
-EOF
+    mkdir -p /etc/crontabs
+    printf '# Backup cron job\n%s . /etc/backup-env.sh; /backup.sh >> /var/log/backup.log 2>&1\n' "$CRON_SCHEDULE" > /etc/crontabs/root
     
-    chmod 0644 /etc/cron.d/backup-cron
+    chmod 0600 /etc/crontabs/root
     
     echo -e "${GREEN}✓ Cron configured${NC}"
     
@@ -188,6 +227,7 @@ EOF
     echo -e "\n${YELLOW}Configuration Summary:${NC}"
     echo "  Database Host: $DB_HOST:$DB_PORT"
     echo "  Databases: $DB_NAMES"
+    echo "  Database SSL Mode: $DB_SSL_MODE"
     echo "  S3 Endpoint: $S3_ENDPOINT"
     echo "  S3 Bucket: $S3_BUCKET"
     echo "  Backup Path Prefix: $S3_PATH_PREFIX"

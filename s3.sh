@@ -6,32 +6,36 @@
 # Helper: URL encode a string
 urlencode() {
     local string="${1}"
-    echo -n "$string" | od -An -tx1 | tr ' ' % | tr -d '\n'
+    local length=${#string}
+    local encoded=""
+    local pos char
+
+    for (( pos = 0; pos < length; pos++ )); do
+        char=${string:$pos:1}
+        case "$char" in
+            [a-zA-Z0-9._~-])
+                encoded+="$char"
+                ;;
+            *)
+                printf -v encoded '%s%%%02X' "$encoded" "'$char"
+                ;;
+        esac
+    done
+
+    echo -n "$encoded"
 }
 
-# Helper: Convert hex string to binary
-hex_to_binary() {
-    printf "\\x$(echo "$1" | sed 's/../\\x&/g')"
-}
-
-# Helper: HMAC-SHA256 (string key, string data, hex output)
-hmac_sha256_hex() {
-    local key="$1"
+# Helper: HMAC-SHA256 (hex key, string data, hex output)
+hmac_sha256_hexkey() {
+    local hex_key="$1"
     local data="$2"
-    echo -n "$data" | openssl dgst -sha256 -hmac "$key" -r | awk '{print $1}'
+    printf '%s' "$data" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$hex_key" -r | awk '{print $1}'
 }
 
-# Helper: HMAC-SHA256 (string key, string data, binary output as hex string)
-hmac_sha256_binary_hex() {
-    local key="$1"
-    local data="$2"
-    echo -n "$data" | openssl dgst -sha256 -hmac "$key" -binary | od -An -tx1 | tr -d ' \n'
-}
-
-# Helper: SHA256 hash
-sha256_hash() {
-    local data="$1"
-    echo -n "$data" | openssl dgst -sha256 -r | awk '{print $1}'
+# Helper: SHA256 hash of a file
+sha256_file_hash() {
+    local file="$1"
+    openssl dgst -sha256 -r "$file" | awk '{print $1}'
 }
 
 # Build AWS Signature V4
@@ -44,6 +48,7 @@ build_signature_v4() {
     local date_stamp="$6"
     
     local s3_host="${S3_ENDPOINT#http*://}"
+    s3_host="${s3_host%/}"
     
     # 1. Build canonical request
     local canonical_headers="host:${s3_host}\nx-amz-content-sha256:${payload_hash}\nx-amz-date:${amz_date}\n"
@@ -51,25 +56,26 @@ build_signature_v4() {
     local canonical_request="${method}\n${path}\n${query}\n${canonical_headers}\n${signed_headers}\n${payload_hash}"
     
     # 2. Create string to sign
-    local canonical_request_hash=$(echo -ne "${canonical_request}" | openssl dgst -sha256 -r | awk '{print $1}')
+    local canonical_request_hash=$(printf '%b' "${canonical_request}" | openssl dgst -sha256 -r | awk '{print $1}')
     local credential_scope="${date_stamp}/${S3_REGION}/s3/aws4_request"
     local string_to_sign="AWS4-HMAC-SHA256\n${amz_date}\n${credential_scope}\n${canonical_request_hash}"
     
     # 3. Calculate signature - derive signing key using HMAC chain
     # kDate = HMAC-SHA256("AWS4" + secretKey, date)
-    local kDate=$(hmac_sha256_binary_hex "AWS4${S3_SECRET_KEY}" "$date_stamp")
+    local secret_hex=$(printf 'AWS4%s' "$S3_SECRET_KEY" | od -An -tx1 | tr -d ' \n')
+    local kDate=$(hmac_sha256_hexkey "$secret_hex" "$date_stamp")
     
     # kRegion = HMAC-SHA256(kDate, region)
-    local kRegion=$(echo -n "$S3_REGION" | openssl dgst -sha256 -hmac "$(hex_to_binary "$kDate")" -binary | od -An -tx1 | tr -d ' \n')
+    local kRegion=$(hmac_sha256_hexkey "$kDate" "$S3_REGION")
     
     # kService = HMAC-SHA256(kRegion, "s3")
-    local kService=$(echo -n "s3" | openssl dgst -sha256 -hmac "$(hex_to_binary "$kRegion")" -binary | od -An -tx1 | tr -d ' \n')
+    local kService=$(hmac_sha256_hexkey "$kRegion" "s3")
     
     # kSigning = HMAC-SHA256(kService, "aws4_request")
-    local kSigning=$(echo -n "aws4_request" | openssl dgst -sha256 -hmac "$(hex_to_binary "$kService")" -binary | od -An -tx1 | tr -d ' \n')
+    local kSigning=$(hmac_sha256_hexkey "$kService" "aws4_request")
     
     # signature = HMAC-SHA256(kSigning, stringToSign)
-    local signature=$(echo -ne "$string_to_sign" | openssl dgst -sha256 -hmac "$(hex_to_binary "$kSigning")" -r | awk '{print $1}')
+    local signature=$(printf '%b' "$string_to_sign" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$kSigning" -r | awk '{print $1}')
     
     echo "$signature"
 }
@@ -85,7 +91,7 @@ s3_put() {
     fi
     
     local file_size=$(stat -f%z "$local_file" 2>/dev/null || stat -c%s "$local_file" 2>/dev/null)
-    local payload_hash=$(sha256_hash "$(cat "$local_file")")
+    local payload_hash=$(sha256_file_hash "$local_file")
     
     local amz_date=$(date -u +"%Y%m%dT%H%M%SZ")
     local date_stamp=$(date -u +"%Y%m%d")
@@ -95,6 +101,7 @@ s3_put() {
     local auth_header="AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY}/${date_stamp}/${S3_REGION}/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
     
     local s3_host="${S3_ENDPOINT#http*://}"
+    s3_host="${s3_host%/}"
     local http_code=$(curl -s -w "%{http_code}" -o /tmp/s3_put_response.txt \
         -X PUT \
         --data-binary @"$local_file" \
@@ -103,7 +110,7 @@ s3_put() {
         -H "Authorization: $auth_header" \
         -H "Content-Length: $file_size" \
         -H "Host: $s3_host" \
-        "${S3_ENDPOINT}/${S3_BUCKET}/${s3_key}")
+        "${S3_ENDPOINT%/}/${S3_BUCKET}/${s3_key}")
     
     if [[ "$http_code" == "200" ]]; then
         return 0
@@ -127,13 +134,14 @@ s3_delete() {
     local auth_header="AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY}/${date_stamp}/${S3_REGION}/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
     
     local s3_host="${S3_ENDPOINT#http*://}"
+    s3_host="${s3_host%/}"
     local http_code=$(curl -s -w "%{http_code}" -o /tmp/s3_delete_response.txt \
         -X DELETE \
         -H "x-amz-date: $amz_date" \
         -H "x-amz-content-sha256: $empty_hash" \
         -H "Authorization: $auth_header" \
         -H "Host: $s3_host" \
-        "${S3_ENDPOINT}/${S3_BUCKET}/${s3_key}")
+        "${S3_ENDPOINT%/}/${S3_BUCKET}/${s3_key}")
     
     if [[ "$http_code" == "204" ]]; then
         return 0
@@ -158,13 +166,18 @@ s3_list() {
     local auth_header="AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY}/${date_stamp}/${S3_REGION}/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
     
     local s3_host="${S3_ENDPOINT#http*://}"
+    s3_host="${s3_host%/}"
     curl -s \
         -H "x-amz-date: $amz_date" \
         -H "x-amz-content-sha256: $empty_hash" \
         -H "Authorization: $auth_header" \
         -H "Host: $s3_host" \
-        "${S3_ENDPOINT}/${S3_BUCKET}/?${query_string}" | \
-        grep -oP '(?<=<Key>)[^<]+|(?<=<LastModified>)[^<]+' | paste - - | \
+        "${S3_ENDPOINT%/}/${S3_BUCKET}/?${query_string}" | \
+        awk -v RS='[<>]' '
+            previous == "Key" { key = $0 }
+            previous == "LastModified" && key != "" { print key "\t" $0 }
+            { previous = $0 }
+        ' | \
         while read key modified; do
             modified_epoch=$(date -d "$modified" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S.000Z" "$modified" +%s 2>/dev/null || echo 0)
             echo "$key $modified_epoch"
@@ -182,13 +195,14 @@ s3_create_bucket() {
     local auth_header="AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY}/${date_stamp}/${S3_REGION}/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
     
     local s3_host="${S3_ENDPOINT#http*://}"
+    s3_host="${s3_host%/}"
     local http_code=$(curl -s -w "%{http_code}" -o /tmp/s3_create_bucket_response.txt \
         -X PUT \
         -H "x-amz-date: $amz_date" \
         -H "x-amz-content-sha256: $empty_hash" \
         -H "Authorization: $auth_header" \
         -H "Host: $s3_host" \
-        "${S3_ENDPOINT}/${S3_BUCKET}/")
+        "${S3_ENDPOINT%/}/${S3_BUCKET}/")
     
     # 200 = created, 409 = already exists (both OK)
     if [[ "$http_code" == "200" ]] || [[ "$http_code" == "409" ]]; then

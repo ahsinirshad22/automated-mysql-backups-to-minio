@@ -12,7 +12,7 @@ RUN apk add --no-cache \
     bash
 
 # Create necessary directories
-RUN mkdir -p /var/log /etc/cron.d
+RUN mkdir -p /var/log /etc/crontabs
 
 # Copy scripts
 COPY s3.sh /
