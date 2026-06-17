@@ -1,33 +1,19 @@
-FROM alpine:latest
+FROM python:3.12-slim
 
-# Install required packages
-RUN apk add --no-cache \
-    mysql-client \
-    curl \
-    dcron \
-    gzip \
-    openssl \
-    coreutils \
-    ca-certificates \
-    bash
+WORKDIR /app
 
-# Create necessary directories
-RUN mkdir -p /var/log /etc/crontabs
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends default-mysql-client gzip \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy scripts
-COPY s3.sh /
-COPY backup.sh /
-COPY entrypoint.sh /
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Make scripts executable
-RUN chmod +x /backup.sh /entrypoint.sh /s3.sh
+COPY app ./app
 
-# Set working directory
-WORKDIR /
+EXPOSE 8000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD pgrep crond > /dev/null || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()" || exit 1
 
-# Start the entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

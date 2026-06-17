@@ -15,8 +15,6 @@ services:
       DB_NAMES: ${DB_NAMES}
       DB_SSL_MODE: ${DB_SSL_MODE:-DISABLED}
       DB_SSL_CA: ${DB_SSL_CA:-}
-      DB_SSL_CERT: ${DB_SSL_CERT:-}
-      DB_SSL_KEY: ${DB_SSL_KEY:-}
       
       # S3 Configuration
       S3_ENDPOINT: ${S3_ENDPOINT}
@@ -26,24 +24,19 @@ services:
       S3_PATH_PREFIX: ${S3_PATH_PREFIX:-backups}
       S3_REGION: ${S3_REGION:-us-east-1}
       
-      # Cron & Retention
-      CRON_SCHEDULE: ${CRON_SCHEDULE:-0 2 * * *}
-      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      # API & Backup Settings
+      BACKUP_API_KEY: ${BACKUP_API_KEY:-}
       BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-3600}
-      
-      # Health Checks (set to 'true' to skip startup validation)
-      SKIP_HEALTH_CHECK: ${SKIP_HEALTH_CHECK:-false}
-    
-    # Optional: Mount a volume to access logs
-    volumes:
-      - ./logs:/var/log:rw
     
     # Optional: Network configuration for Coolify
     # networks:
     #   - coolify
     
+    ports:
+      - "8000:8000"
+    
     healthcheck:
-      test: ["CMD", "pgrep", "crond"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 3
