@@ -73,6 +73,8 @@ def service_status() -> dict:
 def status_class(status_value: str) -> str:
     if status_value in {"connected", "running"}:
         return "ok"
+    if status_value == "disabled":
+        return "warn"
     return "bad"
 
 
@@ -98,7 +100,8 @@ def status_page():
     cron_message = (
         f"Schedule: {cron.get('schedule') or 'not configured'} | "
         f"Timezone: {cron.get('timezone') or 'not configured'} | "
-        f"Next run: {cron.get('next_run_time') or 'not scheduled'}"
+        f"Next run: {cron.get('next_run_time') or 'not scheduled'} | "
+        f"{cron.get('message') or ''}"
     )
     cards = "\n".join(
         [
@@ -144,6 +147,8 @@ def status_page():
                 --ok-bg: #e9f7ef;
                 --bad: #b42318;
                 --bad-bg: #fff0ee;
+                --warn: #a15c07;
+                --warn-bg: #fff7e6;
             }}
             * {{ box-sizing: border-box; }}
             body {{
@@ -233,6 +238,9 @@ def status_page():
             .bad {{ border-color: rgba(180, 35, 24, 0.35); }}
             .bad .dot {{ background: var(--bad); box-shadow: 0 0 0 5px var(--bad-bg); }}
             .bad .status-text {{ color: var(--bad); }}
+            .warn {{ border-color: rgba(161, 92, 7, 0.35); }}
+            .warn .dot {{ background: var(--warn); box-shadow: 0 0 0 5px var(--warn-bg); }}
+            .warn .status-text {{ color: var(--warn); }}
             @media (max-width: 760px) {{
                 header {{ display: block; }}
                 .badge {{ display: inline-block; margin-top: 16px; }}

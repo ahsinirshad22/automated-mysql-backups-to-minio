@@ -4,12 +4,13 @@ import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.backup import BackupAlreadyRunning, create_backups, required_env
+from app.backup import BackupAlreadyRunning, create_backups
 from app.notifications import backup_result_failed, notify_backup_failure
 
 
 logger = logging.getLogger(__name__)
 scheduler: BackgroundScheduler | None = None
+scheduler_error: str | None = None
 
 
 def run_scheduled_backup() -> None:
@@ -31,14 +32,30 @@ def run_scheduled_backup() -> None:
 
 
 def start_scheduler() -> None:
-    global scheduler
+    global scheduler, scheduler_error
 
     if scheduler and scheduler.running:
         return
 
-    schedule = required_env("BACKUP_CRON_SCHEDULE")
-    timezone = required_env("BACKUP_CRON_TIMEZONE")
-    trigger = CronTrigger.from_crontab(schedule, timezone=timezone)
+    schedule = os.getenv("BACKUP_CRON_SCHEDULE", "").strip()
+    timezone = os.getenv("BACKUP_CRON_TIMEZONE", "").strip()
+
+    if not schedule:
+        scheduler_error = "BACKUP_CRON_SCHEDULE is not configured; automated backups are disabled"
+        logger.warning(scheduler_error)
+        return
+
+    if not timezone:
+        scheduler_error = "BACKUP_CRON_TIMEZONE is not configured; automated backups are disabled"
+        logger.warning(scheduler_error)
+        return
+
+    try:
+        trigger = CronTrigger.from_crontab(schedule, timezone=timezone)
+    except Exception as exc:
+        scheduler_error = f"Invalid cron scheduler configuration: {exc}"
+        logger.exception(scheduler_error)
+        return
 
     scheduler = BackgroundScheduler(timezone=timezone)
     scheduler.add_job(
@@ -50,25 +67,28 @@ def start_scheduler() -> None:
         max_instances=1,
     )
     scheduler.start()
+    scheduler_error = None
     logger.info("Backup scheduler started with schedule %s in %s", schedule, timezone)
 
 
 def stop_scheduler() -> None:
-    global scheduler
+    global scheduler, scheduler_error
 
     if scheduler and scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("Backup scheduler stopped")
     scheduler = None
+    scheduler_error = None
 
 
 def scheduler_status() -> dict[str, str | None]:
     if not scheduler:
         return {
-            "status": "not_running",
+            "status": "disabled" if scheduler_error else "not_running",
             "schedule": os.getenv("BACKUP_CRON_SCHEDULE"),
             "timezone": os.getenv("BACKUP_CRON_TIMEZONE"),
             "next_run_time": None,
+            "message": scheduler_error or "Cron scheduler is not running",
         }
 
     job = scheduler.get_job("automated_mysql_backup")
@@ -77,4 +97,5 @@ def scheduler_status() -> dict[str, str | None]:
         "schedule": os.getenv("BACKUP_CRON_SCHEDULE"),
         "timezone": os.getenv("BACKUP_CRON_TIMEZONE"),
         "next_run_time": job.next_run_time.isoformat() if job and job.next_run_time else None,
+        "message": "Cron scheduler is running" if scheduler.running else "Cron scheduler is not running",
     }

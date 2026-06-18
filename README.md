@@ -193,8 +193,8 @@ If a backup is already running, the endpoint returns HTTP `409`.
 | `S3_PATH_PREFIX` | no | `backups` | Object key prefix |
 | `S3_REGION` | no | `us-east-1` | S3 region |
 | `BACKUP_API_KEY` | yes | - | API key required for protected endpoints |
-| `BACKUP_CRON_SCHEDULE` | yes | - | Cron expression for automated backups |
-| `BACKUP_CRON_TIMEZONE` | yes | - | Timezone for automated backups, e.g. `Asia/Karachi` |
+| `BACKUP_CRON_SCHEDULE` | no | - | Cron expression for automated backups; blank disables scheduling |
+| `BACKUP_CRON_TIMEZONE` | if scheduling | - | Timezone for automated backups, e.g. `Asia/Karachi` |
 | `BACKUP_TIMEOUT` | no | `3600` | Max seconds per `mysqldump` |
 | `MAX_BACKUPS_PER_DATABASE` | no | `30` | Keep only the latest N `.sql.gz` backups per database; `0` disables cleanup |
 | `SMTP_HOST` | on failure email | - | SMTP server host |
@@ -216,6 +216,8 @@ BACKUP_CRON_TIMEZONE=Asia/Karachi
 ```
 
 Manual backups still work through `POST /backups/run`.
+
+Leave `BACKUP_CRON_SCHEDULE` blank to disable automated backups without stopping the app.
 
 ## Failure Emails
 
