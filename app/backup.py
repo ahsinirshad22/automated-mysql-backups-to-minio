@@ -108,6 +108,7 @@ def cleanup_old_backups(
     bucket: str,
     database_prefix: str,
     keep_count: int,
+    uploaded_key: str,
 ) -> list[str]:
     if keep_count == 0:
         return []
@@ -123,6 +124,16 @@ def cleanup_old_backups(
         for item in objects
         if item.get("Key", "").endswith(".sql.gz")
     ]
+
+    if not any(item.get("Key") == uploaded_key for item in backups):
+        uploaded_object = client.head_object(Bucket=bucket, Key=uploaded_key)
+        backups.append(
+            {
+                "Key": uploaded_key,
+                "LastModified": uploaded_object["LastModified"],
+            }
+        )
+
     backups.sort(key=lambda item: item["LastModified"], reverse=True)
 
     old_backups = backups[keep_count:]
@@ -201,6 +212,7 @@ def create_backups() -> dict[str, Any]:
                     bucket,
                     database_prefix,
                     keep_count,
+                    s3_key,
                 )
                 results.append(
                     {
