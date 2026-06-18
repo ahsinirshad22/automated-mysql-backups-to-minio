@@ -68,7 +68,7 @@ Returns:
 
 ```bash
 curl -H "X-API-Key: change-this-long-random-secret" \
-  http://localhost:8000/db-check
+  http://localhost:8000/status/database
 ```
 
 Returns:
@@ -82,7 +82,7 @@ Returns:
 ```bash
 curl -X POST \
   -H "X-API-Key: change-this-long-random-secret" \
-  http://localhost:8000/backups/run
+  http://localhost:8000/backup/generate
 ```
 
 Example response:
@@ -105,7 +105,8 @@ Example response:
 ## Behavior
 
 - `GET /health` is public.
-- `GET /db-check` and `POST /backups/run` require `X-API-Key`.
+- `GET /status/database`, `GET /status/s3`, `GET /status/smtp`, and `GET /status/cron` expose public status checks.
+- `POST /backup/generate` requires `X-API-Key`.
 - Automated backups run from `BACKUP_CRON_SCHEDULE` in `BACKUP_CRON_TIMEZONE`.
 - Only one backup can run at a time; concurrent backup requests return HTTP `409`.
 - Each backup runs `mysqldump`, compresses the dump with gzip, and uploads it with `boto3`.
@@ -135,5 +136,5 @@ Then call:
 ```bash
 curl -X POST \
   -H "X-API-Key: change-this-long-random-secret" \
-  http://localhost:8000/backups/run
+  http://localhost:8000/backup/generate
 ```

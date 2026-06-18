@@ -102,8 +102,15 @@ Open the same URL in a browser for the HTML status dashboard.
 Check database connectivity:
 
 ```bash
-curl -H "X-API-Key: change-this-long-random-secret" \
-  http://localhost:8000/db-check
+curl http://localhost:8000/status/database
+```
+
+Check S3, SMTP, and cron status:
+
+```bash
+curl http://localhost:8000/status/s3
+curl http://localhost:8000/status/smtp
+curl http://localhost:8000/status/cron
 ```
 
 Trigger a backup:
@@ -111,7 +118,7 @@ Trigger a backup:
 ```bash
 curl -X POST \
   -H "X-API-Key: change-this-long-random-secret" \
-  http://localhost:8000/backups/run
+  http://localhost:8000/backup/generate
 ```
 
 ## API
@@ -132,21 +139,54 @@ Public health endpoint.
 {"status": "ok"}
 ```
 
-### `GET /db-check`
+### `GET /status/database`
 
-Requires:
-
-```text
-X-API-Key: <BACKUP_API_KEY>
-```
-
-Returns:
+Public database status endpoint.
 
 ```json
-{"status": "connected"}
+{
+  "status": "connected",
+  "message": "Database connection success"
+}
 ```
 
-### `POST /backups/run`
+### `GET /status/s3`
+
+Public S3 API status endpoint.
+
+```json
+{
+  "status": "connected",
+  "message": "S3 API connection success"
+}
+```
+
+### `GET /status/smtp`
+
+Public SMTP status endpoint.
+
+```json
+{
+  "status": "connected",
+  "message": "SMTP connection success"
+}
+```
+
+### `GET /status/cron`
+
+Public cron scheduler status endpoint.
+
+```json
+{
+  "status": "running",
+  "schedule": "0 2 * * *",
+  "timezone": "Asia/Karachi",
+  "next_run_time": "2026-06-19T02:00:00+05:00",
+  "message": "Cron scheduler is running"
+}
+```
+
+### `POST /backup/generate`
 
 Requires:
 
@@ -215,7 +255,7 @@ BACKUP_CRON_SCHEDULE=0 2 * * *
 BACKUP_CRON_TIMEZONE=Asia/Karachi
 ```
 
-Manual backups still work through `POST /backups/run`.
+Manual backups still work through `POST /backup/generate`.
 
 Leave `BACKUP_CRON_SCHEDULE` blank to disable automated backups without stopping the app.
 
@@ -254,7 +294,7 @@ gunzip < database_name_YYYY-MM-DD_HH-MM-SS.sql.gz | mysql \
 
 ## Notes
 
-- Backups can be triggered instantly through `POST /backups/run` and automatically through the in-app cron scheduler.
+- Backups can be triggered instantly through `POST /backup/generate` and automatically through the in-app cron scheduler.
 - After each successful database upload, the service deletes older `.sql.gz` objects beyond `MAX_BACKUPS_PER_DATABASE` for that database prefix.
 - Logs go to container stdout/stderr and can be viewed with `docker logs db-backup`.
 - Protect this service from public traffic. The backup endpoint can create database dumps and upload them to object storage.

@@ -272,6 +272,26 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/status/database")
+def database_status():
+    return check_database_connection()
+
+
+@app.get("/status/s3")
+def s3_status():
+    return check_s3_connection()
+
+
+@app.get("/status/smtp")
+def smtp_status():
+    return check_smtp_connection()
+
+
+@app.get("/status/cron")
+def cron_status():
+    return scheduler_status()
+
+
 @app.on_event("startup")
 def startup():
     start_scheduler()
@@ -282,18 +302,8 @@ def shutdown():
     stop_scheduler()
 
 
-@app.get("/db-check")
-def db_check(x_api_key: str | None = Header(default=None)):
-    require_api_key(x_api_key)
-
-    db_status = check_database_connection()
-    if db_status["status"] != "connected":
-        raise HTTPException(status_code=500, detail=db_status["message"])
-    return {"status": "connected"}
-
-
-@app.post("/backups/run")
-def run_backup(x_api_key: str | None = Header(default=None)):
+@app.post("/backup/generate")
+def generate_backup(x_api_key: str | None = Header(default=None)):
     require_api_key(x_api_key)
 
     try:

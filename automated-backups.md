@@ -6,8 +6,9 @@ This project uses FastAPI for instant backups and an in-app cron scheduler for a
 
 - FastAPI serves the backup API on port `8000`.
 - `GET /health` is public.
-- `GET /db-check` verifies the MySQL connection and requires `X-API-Key`.
-- `POST /backups/run` triggers instant backups and requires `X-API-Key`.
+- `GET /status/database` verifies the MySQL connection.
+- `GET /status/s3`, `GET /status/smtp`, and `GET /status/cron` expose service status.
+- `POST /backup/generate` triggers instant backups and requires `X-API-Key`.
 - Automated backups run from `BACKUP_CRON_SCHEDULE` in `BACKUP_CRON_TIMEZONE`.
 - `mysqldump` creates one dump per database in `DB_NAMES`.
 - Dumps are compressed as `.sql.gz`.
