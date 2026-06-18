@@ -12,6 +12,8 @@ from app.backup import (
     db_ssl_config,
     required_env,
 )
+from app.notifications import backup_result_failed, notify_backup_failure
+from app.scheduler import start_scheduler, stop_scheduler
 
 
 load_dotenv()
@@ -36,6 +38,16 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def startup():
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown():
+    stop_scheduler()
 
 
 @app.get("/db-check")
@@ -64,10 +76,14 @@ def run_backup(x_api_key: str | None = Header(default=None)):
     require_api_key(x_api_key)
 
     try:
-        return create_backups()
+        result = create_backups()
+        if backup_result_failed(result):
+            notify_backup_failure("manual", result)
+        return result
     except BackupAlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
+        notify_backup_failure("manual", {"error": str(exc)})
         raise HTTPException(status_code=500, detail=str(exc)) from exc

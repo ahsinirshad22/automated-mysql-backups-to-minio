@@ -1,6 +1,6 @@
 # FastAPI MySQL Backup Trigger Implementation
 
-This repository is a FastAPI service that connects to MySQL and exposes an authenticated endpoint to trigger backups. It does not use models, schemas, SQLAlchemy, cron, shell entrypoints, or custom S3 signing scripts.
+This repository is a FastAPI service that connects to MySQL, exposes an authenticated endpoint to trigger backups, and runs automated backups through an in-app cron scheduler. It does not use models, schemas, SQLAlchemy, OS cron, shell entrypoints, or custom S3 signing scripts.
 
 ## Runtime Shape
 
@@ -33,8 +33,19 @@ S3_PATH_PREFIX=backups
 S3_REGION=us-east-1
 
 BACKUP_API_KEY=change-this-long-random-secret
+BACKUP_CRON_SCHEDULE=0 2 * * *
+BACKUP_CRON_TIMEZONE=Asia/Karachi
 BACKUP_TIMEOUT=3600
 MAX_BACKUPS_PER_DATABASE=30
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=user@example.com
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_EMAIL=backups@example.com
+SMTP_TO_EMAIL=admin@example.com
+SMTP_SECURITY=STARTTLS
+HOST_EMAIL=host@example.com
 ```
 
 `DB_NAMES` can contain one database or multiple comma-separated database names.
@@ -95,9 +106,11 @@ Example response:
 
 - `GET /health` is public.
 - `GET /db-check` and `POST /backups/run` require `X-API-Key`.
+- Automated backups run from `BACKUP_CRON_SCHEDULE` in `BACKUP_CRON_TIMEZONE`.
 - Only one backup can run at a time; concurrent backup requests return HTTP `409`.
 - Each backup runs `mysqldump`, compresses the dump with gzip, and uploads it with `boto3`.
 - After each successful upload, older `.sql.gz` backups beyond `MAX_BACKUPS_PER_DATABASE` are deleted for that database.
+- Manual and scheduled backup failures send SMTP email notifications.
 - Failures for individual databases are returned in the `results` array.
 - Missing configuration or S3 setup errors return HTTP `500`.
 

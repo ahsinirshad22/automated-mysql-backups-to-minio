@@ -1,20 +1,21 @@
 # Automated Backup API Plan
 
-This project now uses an API-triggered backup model instead of an internal cron daemon.
+This project uses FastAPI for instant backups and an in-app cron scheduler for automated backups. It does not use an OS cron daemon.
 
 ## Current Design
 
 - FastAPI serves the backup API on port `8000`.
 - `GET /health` is public.
 - `GET /db-check` verifies the MySQL connection and requires `X-API-Key`.
-- `POST /backups/run` triggers backups and requires `X-API-Key`.
+- `POST /backups/run` triggers instant backups and requires `X-API-Key`.
+- Automated backups run from `BACKUP_CRON_SCHEDULE` in `BACKUP_CRON_TIMEZONE`.
 - `mysqldump` creates one dump per database in `DB_NAMES`.
 - Dumps are compressed as `.sql.gz`.
 - Uploads use `boto3` against MinIO or any S3-compatible endpoint.
 
 ## Removed Old Logic
 
-- No cron daemon.
+- No OS cron daemon.
 - No startup backup.
 - No shell `entrypoint.sh`.
 - No shell `backup.sh`.
@@ -40,9 +41,26 @@ S3_PATH_PREFIX=backups
 S3_REGION=us-east-1
 
 BACKUP_API_KEY=change-this-long-random-secret
+BACKUP_CRON_SCHEDULE=0 2 * * *
+BACKUP_CRON_TIMEZONE=Asia/Karachi
 BACKUP_TIMEOUT=3600
 MAX_BACKUPS_PER_DATABASE=30
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=user@example.com
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_EMAIL=backups@example.com
+SMTP_TO_EMAIL=admin@example.com
+SMTP_SECURITY=STARTTLS
+HOST_EMAIL=host@example.com
 ```
+
+## Failure Emails
+
+Failure emails are sent for manual and scheduled backups when any database backup fails or the job crashes.
+
+`SMTP_SECURITY` accepts `STARTTLS`, `SSL`, or `NONE`.
 
 ## Retention
 

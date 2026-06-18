@@ -2,16 +2,18 @@
 
 A lightweight FastAPI service that triggers MySQL backups through an authenticated API call and uploads compressed `.sql.gz` dumps to MinIO or S3-compatible storage.
 
-This project does not use cron, shell entrypoints, custom S3 signing scripts, schemas, SQLAlchemy models, or an ORM. Backups run only when `POST /backups/run` is called with the configured API key.
+This project uses FastAPI for instant backup triggers and an in-app cron scheduler for automated backups. It does not use OS cron, shell entrypoints, custom S3 signing scripts, schemas, SQLAlchemy models, or an ORM.
 
 ## Features
 
 - API-triggered MySQL backups
+- Automated in-app cron backups
 - Multi-database support through comma-separated `DB_NAMES`
 - Gzip-compressed `mysqldump` output
 - MinIO/S3 upload using `boto3`
 - API key protection with `X-API-Key`
 - Simple health and DB connectivity endpoints
+- Failure emails through SMTP
 - Optional MySQL TLS modes for self-signed or CA-verified connections
 
 ## Quick Start
@@ -38,8 +40,19 @@ S3_PATH_PREFIX=backups
 S3_REGION=us-east-1
 
 BACKUP_API_KEY=change-this-long-random-secret
+BACKUP_CRON_SCHEDULE=0 2 * * *
+BACKUP_CRON_TIMEZONE=Asia/Karachi
 BACKUP_TIMEOUT=3600
 MAX_BACKUPS_PER_DATABASE=30
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=user@example.com
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_EMAIL=backups@example.com
+SMTP_TO_EMAIL=admin@example.com
+SMTP_SECURITY=STARTTLS
+HOST_EMAIL=host@example.com
 ```
 
 Build and run:
@@ -164,8 +177,41 @@ If a backup is already running, the endpoint returns HTTP `409`.
 | `S3_PATH_PREFIX` | no | `backups` | Object key prefix |
 | `S3_REGION` | no | `us-east-1` | S3 region |
 | `BACKUP_API_KEY` | yes | - | API key required for protected endpoints |
+| `BACKUP_CRON_SCHEDULE` | yes | - | Cron expression for automated backups |
+| `BACKUP_CRON_TIMEZONE` | yes | - | Timezone for automated backups, e.g. `Asia/Karachi` |
 | `BACKUP_TIMEOUT` | no | `3600` | Max seconds per `mysqldump` |
 | `MAX_BACKUPS_PER_DATABASE` | no | `30` | Keep only the latest N `.sql.gz` backups per database; `0` disables cleanup |
+| `SMTP_HOST` | on failure email | - | SMTP server host |
+| `SMTP_PORT` | on failure email | - | SMTP server port |
+| `SMTP_USERNAME` | no | - | SMTP username |
+| `SMTP_PASSWORD` | no | - | SMTP password |
+| `SMTP_FROM_EMAIL` | on failure email | - | Sender email address |
+| `SMTP_TO_EMAIL` | on failure email | - | Recipient email address |
+| `SMTP_SECURITY` | no | `STARTTLS` | `STARTTLS`, `SSL`, or `NONE` |
+| `HOST_EMAIL` | no | - | Host/admin email included in failure email body |
+
+## Automated Backups
+
+Automated backups run inside the FastAPI process using `BACKUP_CRON_SCHEDULE` and `BACKUP_CRON_TIMEZONE`.
+
+```env
+BACKUP_CRON_SCHEDULE=0 2 * * *
+BACKUP_CRON_TIMEZONE=Asia/Karachi
+```
+
+Manual backups still work through `POST /backups/run`.
+
+## Failure Emails
+
+Failure emails are sent when a manual or scheduled backup fails for any database, or when the backup job crashes before returning a normal result.
+
+Set SMTP encryption with one variable:
+
+```env
+SMTP_SECURITY=STARTTLS
+```
+
+Allowed values are `STARTTLS`, `SSL`, and `NONE`.
 
 ## Backup Layout
 
@@ -190,7 +236,7 @@ gunzip < database_name_YYYY-MM-DD_HH-MM-SS.sql.gz | mysql \
 
 ## Notes
 
-- Backups are not scheduled by this service. Call `POST /backups/run` from your app, CI/CD, Coolify task, cron outside the container, or another scheduler.
+- Backups can be triggered instantly through `POST /backups/run` and automatically through the in-app cron scheduler.
 - After each successful database upload, the service deletes older `.sql.gz` objects beyond `MAX_BACKUPS_PER_DATABASE` for that database prefix.
 - Logs go to container stdout/stderr and can be viewed with `docker logs db-backup`.
 - Protect this service from public traffic. The backup endpoint can create database dumps and upload them to object storage.

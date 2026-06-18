@@ -26,8 +26,20 @@ services:
       
       # API & Backup Settings
       BACKUP_API_KEY: ${BACKUP_API_KEY:-}
+      BACKUP_CRON_SCHEDULE: ${BACKUP_CRON_SCHEDULE:-}
+      BACKUP_CRON_TIMEZONE: ${BACKUP_CRON_TIMEZONE:-}
       BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-3600}
       MAX_BACKUPS_PER_DATABASE: ${MAX_BACKUPS_PER_DATABASE:-30}
+      
+      # Failure Notification Settings
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_TO_EMAIL: ${SMTP_TO_EMAIL:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-STARTTLS}
+      HOST_EMAIL: ${HOST_EMAIL:-}
     
     # Optional: Network configuration for Coolify
     # networks:
