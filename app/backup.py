@@ -73,7 +73,12 @@ def s3_client():
         aws_access_key_id=required_env("S3_ACCESS_KEY"),
         aws_secret_access_key=required_env("S3_SECRET_KEY"),
         region_name=os.getenv("S3_REGION", "us-east-1"),
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            connect_timeout=5,
+            read_timeout=5,
+        ),
     )
 
 
@@ -81,6 +86,22 @@ def ensure_bucket(client, bucket: str) -> None:
     existing = [item["Name"] for item in client.list_buckets().get("Buckets", [])]
     if bucket not in existing:
         client.create_bucket(Bucket=bucket)
+
+
+def check_s3_connection() -> dict[str, str]:
+    try:
+        client = s3_client()
+        bucket = required_env("S3_BUCKET")
+        client.head_bucket(Bucket=bucket)
+        return {
+            "status": "connected",
+            "message": "S3 API connection success",
+        }
+    except Exception as exc:
+        return {
+            "status": "not_connected",
+            "message": f"S3 API connection failed: {exc}",
+        }
 
 
 def database_names() -> list[str]:

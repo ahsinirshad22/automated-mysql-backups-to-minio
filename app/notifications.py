@@ -24,6 +24,38 @@ def smtp_security() -> str:
     return security
 
 
+def check_smtp_connection() -> dict[str, str]:
+    try:
+        host = required_env("SMTP_HOST")
+        port = int(required_env("SMTP_PORT"))
+        username = os.getenv("SMTP_USERNAME", "")
+        password = os.getenv("SMTP_PASSWORD", "")
+        security = smtp_security()
+
+        if security == "SSL":
+            server = smtplib.SMTP_SSL(host, port, timeout=10)
+        else:
+            server = smtplib.SMTP(host, port, timeout=10)
+
+        with server:
+            server.ehlo()
+            if security == "STARTTLS":
+                server.starttls()
+                server.ehlo()
+            if username or password:
+                server.login(username, password)
+
+        return {
+            "status": "connected",
+            "message": "SMTP connection success",
+        }
+    except Exception as exc:
+        return {
+            "status": "not_connected",
+            "message": f"SMTP connection failed: {exc}",
+        }
+
+
 def send_failure_email(subject: str, body: str) -> None:
     host = required_env("SMTP_HOST")
     port = int(required_env("SMTP_PORT"))

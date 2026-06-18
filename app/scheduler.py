@@ -60,3 +60,21 @@ def stop_scheduler() -> None:
         scheduler.shutdown(wait=False)
         logger.info("Backup scheduler stopped")
     scheduler = None
+
+
+def scheduler_status() -> dict[str, str | None]:
+    if not scheduler:
+        return {
+            "status": "not_running",
+            "schedule": os.getenv("BACKUP_CRON_SCHEDULE"),
+            "timezone": os.getenv("BACKUP_CRON_TIMEZONE"),
+            "next_run_time": None,
+        }
+
+    job = scheduler.get_job("automated_mysql_backup")
+    return {
+        "status": "running" if scheduler.running else "not_running",
+        "schedule": os.getenv("BACKUP_CRON_SCHEDULE"),
+        "timezone": os.getenv("BACKUP_CRON_TIMEZONE"),
+        "next_run_time": job.next_run_time.isoformat() if job and job.next_run_time else None,
+    }

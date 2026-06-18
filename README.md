@@ -91,6 +91,14 @@ Check health:
 curl http://localhost:8000/health
 ```
 
+Check service status:
+
+```bash
+curl http://localhost:8000/
+```
+
+Open the same URL in a browser for the HTML status dashboard.
+
 Check database connectivity:
 
 ```bash
@@ -107,6 +115,14 @@ curl -X POST \
 ```
 
 ## API
+
+### `GET /`
+
+Public HTML service status dashboard.
+
+Shows database, S3 API, SMTP, and cron scheduler status. The same endpoint can be opened in a browser.
+
+Invalid SMTP or S3 settings fail safely and render as `Not Connected` cards instead of crashing the page.
 
 ### `GET /health`
 
