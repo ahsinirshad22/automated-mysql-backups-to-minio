@@ -41,4 +41,11 @@ S3_REGION=us-east-1
 
 BACKUP_API_KEY=change-this-long-random-secret
 BACKUP_TIMEOUT=3600
+MAX_BACKUPS_PER_DATABASE=30
 ```
+
+## Retention
+
+After a database backup uploads successfully, the API lists `.sql.gz` objects under that database prefix, keeps the latest `MAX_BACKUPS_PER_DATABASE`, and deletes older objects.
+
+Set `MAX_BACKUPS_PER_DATABASE=0` to disable cleanup.

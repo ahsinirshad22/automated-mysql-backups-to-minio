@@ -27,6 +27,7 @@ services:
       # API & Backup Settings
       BACKUP_API_KEY: ${BACKUP_API_KEY:-}
       BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-3600}
+      MAX_BACKUPS_PER_DATABASE: ${MAX_BACKUPS_PER_DATABASE:-30}
     
     # Optional: Network configuration for Coolify
     # networks:

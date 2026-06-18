@@ -90,6 +90,52 @@ def database_names() -> list[str]:
     return names
 
 
+def max_backups_per_database() -> int:
+    raw_value = os.getenv("MAX_BACKUPS_PER_DATABASE", "30")
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("MAX_BACKUPS_PER_DATABASE must be an integer") from exc
+
+    if value < 0:
+        raise RuntimeError("MAX_BACKUPS_PER_DATABASE must be greater than or equal to 0")
+
+    return value
+
+
+def cleanup_old_backups(
+    client,
+    bucket: str,
+    database_prefix: str,
+    keep_count: int,
+) -> list[str]:
+    if keep_count == 0:
+        return []
+
+    paginator = client.get_paginator("list_objects_v2")
+    objects: list[dict[str, Any]] = []
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=database_prefix):
+        objects.extend(page.get("Contents", []))
+
+    backups = [
+        item
+        for item in objects
+        if item.get("Key", "").endswith(".sql.gz")
+    ]
+    backups.sort(key=lambda item: item["LastModified"], reverse=True)
+
+    old_backups = backups[keep_count:]
+    deleted: list[str] = []
+
+    for backup in old_backups:
+        key = backup["Key"]
+        client.delete_object(Bucket=bucket, Key=key)
+        deleted.append(key)
+
+    return deleted
+
+
 def dump_database(database: str, output_file: Path) -> None:
     db_port = os.getenv("DB_PORT", "3306")
     timeout = int(os.getenv("BACKUP_TIMEOUT", "3600"))
@@ -132,6 +178,7 @@ def create_backups() -> dict[str, Any]:
     try:
         bucket = required_env("S3_BUCKET")
         prefix = os.getenv("S3_PATH_PREFIX", "backups").strip("/")
+        keep_count = max_backups_per_database()
         client = s3_client()
         ensure_bucket(client, bucket)
 
@@ -141,15 +188,27 @@ def create_backups() -> dict[str, Any]:
         for database in database_names():
             filename = f"{database}_{timestamp}.sql.gz"
             local_file = Path("/tmp") / filename
-            s3_key = f"{prefix}/{database}/{filename}" if prefix else f"{database}/{filename}"
+            database_prefix = f"{prefix}/{database}/" if prefix else f"{database}/"
+            s3_key = f"{database_prefix}{filename}"
 
             logger.info("Starting backup for database %s", database)
 
             try:
                 dump_database(database, local_file)
                 client.upload_file(str(local_file), bucket, s3_key)
+                deleted = cleanup_old_backups(
+                    client,
+                    bucket,
+                    database_prefix,
+                    keep_count,
+                )
                 results.append(
-                    {"database": database, "status": "success", "s3_key": s3_key}
+                    {
+                        "database": database,
+                        "status": "success",
+                        "s3_key": s3_key,
+                        "deleted_old_backups": deleted,
+                    }
                 )
                 logger.info("Backup uploaded for database %s to %s", database, s3_key)
             except subprocess.CalledProcessError as exc:

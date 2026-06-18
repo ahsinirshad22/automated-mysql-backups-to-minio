@@ -39,6 +39,7 @@ S3_REGION=us-east-1
 
 BACKUP_API_KEY=change-this-long-random-secret
 BACKUP_TIMEOUT=3600
+MAX_BACKUPS_PER_DATABASE=30
 ```
 
 Build and run:
@@ -136,7 +137,8 @@ Example response:
     {
       "database": "database1",
       "status": "success",
-      "s3_key": "backups/database1/database1_2026-06-17_10-30-00.sql.gz"
+      "s3_key": "backups/database1/database1_2026-06-17_10-30-00.sql.gz",
+      "deleted_old_backups": []
     }
   ]
 }
@@ -163,6 +165,7 @@ If a backup is already running, the endpoint returns HTTP `409`.
 | `S3_REGION` | no | `us-east-1` | S3 region |
 | `BACKUP_API_KEY` | yes | - | API key required for protected endpoints |
 | `BACKUP_TIMEOUT` | no | `3600` | Max seconds per `mysqldump` |
+| `MAX_BACKUPS_PER_DATABASE` | no | `30` | Keep only the latest N `.sql.gz` backups per database; `0` disables cleanup |
 
 ## Backup Layout
 
@@ -188,5 +191,6 @@ gunzip < database_name_YYYY-MM-DD_HH-MM-SS.sql.gz | mysql \
 ## Notes
 
 - Backups are not scheduled by this service. Call `POST /backups/run` from your app, CI/CD, Coolify task, cron outside the container, or another scheduler.
+- After each successful database upload, the service deletes older `.sql.gz` objects beyond `MAX_BACKUPS_PER_DATABASE` for that database prefix.
 - Logs go to container stdout/stderr and can be viewed with `docker logs db-backup`.
 - Protect this service from public traffic. The backup endpoint can create database dumps and upload them to object storage.
